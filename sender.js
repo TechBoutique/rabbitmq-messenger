@@ -1,53 +1,44 @@
-const amqp = require("amqplib/callback_api");
-const queue = "message";
+const amqp = require("amqplib");
+async function sendMessage(queue, source, destination, subject, body) {
+  const message = {
+    queue: queue,
+    source: source,
+    destination: destination,
+    subject: subject,
+    body: body,
+    platform: "email",
+    message: "Welcome to Hubble",
+    recipient: [
+      {
+        name: "Sarvesh Agrawal",
+        email: "densonabraham98@gmail.com",
+      },
+      {
+        name: "Denson Abraham",
+        email: "densonabraham@karunya.edu.in",
+      },
+    ],
+  };
+  const QUEUE_NAME = queue;
+  const connection = await amqp.connect("amqp://localhost");
+  const channel = await connection.createChannel();
+  await channel.assertQueue(QUEUE_NAME, { durable: true });
+  const payload = JSON.stringify(message);
+  await channel.sendToQueue(
+    QUEUE_NAME,
+    Buffer.from(payload, { persistent: true })
+  );
+  console.log(`Placed a message on the ${QUEUE_NAME} channel.`);
 
-function sendMessage(queue) {
-  connectionStatus = new Promise((response, reject) => {
-    amqp.connect("amqp://localhost", (connectionError, connection) => {
-      if (connectionError) {
-        return reject(connectionError);
-      }
-
-      connection.createChannel((channelError, channel) => {
-        if (channelError) {
-          return reject(channelError);
-        }
-
-        channel.assertQueue(queue, { durable: true });
-        content = {
-          platform: "Email",
-          message: "Welcome to Hubble",
-          recipient: [
-            {
-              name: "Sarvesh Agrawal",
-              email: "sarveshagrawal@karunya.edu.in",
-            },
-            {
-              name: "Denson Abraham",
-              email: "densonabraham@karunya.edu.in",
-            },
-          ],
-        };
-
-        payload = JSON.stringify(content);
-        channel.sendToQueue(queue, Buffer.from(payload, { persistent: true }));
-        console.log(`Enqueued a message on queue : ${queue}`);
-      });
-    });
-  });
-
-  return connectionStatus;
+  /* If the connection is not closed, the process continues to live.
+   * Therefore, close the connection to terminate the process.
+   */
+  await channel.close();
+  await connection.close();
 }
 
-sendMessage(queue)
-  .then((message) => {
-    console.log(message);
-  })
-  .catch((message) => {
-    if (message["code"] === "ECONNREFUSED") {
-      console.log("Rabbit MQ Connection Error, check the server status");
-      console.log(message);
-    } else {
-      console.log("Error in Channel Creation, Rabbit MQ Running");
-    }
-  });
+sendMessage("message", "source", "destination", "subject", "body");
+
+module.exports = {
+  sendMessage,
+};

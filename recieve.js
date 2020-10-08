@@ -1,11 +1,9 @@
-require("dotenv").config();
-const amqp = require("amqplib/callback_api");
+const amqp = require("amqplib");
 const request = require("request");
-const queue = "message";
+const QUEUE_NAME = "message";
+require("dotenv").config();
 
 function createOptions(message, recipientList) {
-  console.log(process.env.API_KEY);
-  console.log(process.env.API_URL);
   const options = {
     method: "POST",
     url: process.env.API_URL,
@@ -15,9 +13,15 @@ function createOptions(message, recipientList) {
       "api-key": process.env.API_KEY,
     },
     body: {
-      sender: { name: "Denson Abraham", email: "densonabraham98@gmail.com" },
+      sender: {
+        name: "Denson Abraham",
+        email: "densonabraham98@gmail.com",
+      },
       to: recipientList,
-      replyTo: { email: "densonabraham98@gmail.com", name: "Denson Abraham" },
+      replyTo: {
+        email: "densonabraham98@gmail.com",
+        name: "Denson Abraham",
+      },
       htmlContent: "This is a verification email for testing",
       textContent: "yo yo",
       subject: "testing",
@@ -28,76 +32,77 @@ function createOptions(message, recipientList) {
 }
 
 function sendEmail(message, recipientList) {
-  console.log("sendEMail");
   let options = createOptions(message, recipientList);
   return new Promise((resolve, reject) => {
     request(options, function (error, response, body) {
       if (error) reject(error);
-      if (response.statusCode != 201) {
-        reject("Invalid status code <" + response.statusCode + ">");
+      if (response.statusCode === 201) {
+        return resolve({
+          statusCode: response["statusCode"],
+          statusMessage: response["statusMessage"],
+        });
+      } else {
+        return reject({
+          statusCode: response["statusCode"],
+        });
       }
-      resolve({
-        statusCode: response["statusCode"],
-        statusMessage: response["statusMessage"],
-      });
     });
   });
 }
 
-function receiveMessage(queue) {
-  connectionStatus = new Promise((response, reject) => {
-    amqp.connect("amqp://localhost", (connectionError, connection) => {
-      if (connectionError) {
-        return reject(connectionError);
-      }
-      connection.createChannel((channelError, channel) => {
-        if (channelError) {
-          return reject(channelError);
-        }
-        channel.assertQueue(queue, { durable: true });
-        channel.consume(
-          queue,
-          async (message) => {
-            let payload = JSON.parse(message.content.toString());
-            const platform = payload["platform"].toLowerCase();
-            if (platform === "email") {
-              let mailStatus = await sendEmail(
-                payload["message"],
-                payload["recipient"]
-              );
-              if (mailStatus["statusCode"] === 201) {
-                console.log("Mail Sent Successfully");
-              } else {
-                reject("Mail not sent successfully");
-              }
-            } else if (platform === "whatsapp") {
-              console.log("Message for whatsapp");
-            } else {
-              return reject(platform + " is an Incorrect Platform");
+async function main() {
+  try {
+    const connection = await amqp.connect("amqp://localhost");
+    const channel = await connection.createChannel();
+    await channel.assertQueue(QUEUE_NAME, { durable: true });
+    await channel.consume(QUEUE_NAME, (message) => {
+      if (message) {
+        try {
+          const payload = JSON.parse(message.content.toString());
+          const platform = payload.platform.toLowerCase();
+          switch (platform) {
+            case "email": {
+              sendEmail(payload["message"], payload["recipient"])
+                .then((message) => {
+                  console.log("Mail sent successfully");
+                })
+                .catch((error) => {
+                  console.log("Email not sent successfully");
+                });
+              break;
             }
-          },
-          {
-            noAck: true,
+
+            case "whatsapp": {
+              console.log("WhatsApp");
+              break;
+            }
+
+            default: {
+              throw new Error(
+                `The specified platform (${platform}) is invalid.`
+              );
+            }
           }
-        );
-      });
+
+          channel.ack(message);
+        } catch (exception) {
+          // What do we do here?
+          console.log(exception);
+        }
+      } else {
+        console.log("[error] Invalid message encountered.");
+      }
     });
-  });
-  return connectionStatus;
+  } catch (exception) {
+    /* TODO: What do we do here?
+     *
+     * At this point, the worker has crashed! Which means, the message channel is being filled
+     * without any consumer. We should probably send ourselves an emergency email that will
+     * allow us to intervene in such cases.
+     */
+
+    console.log(exception);
+  }
 }
 
-receiveMessage(queue)
-  .then((message) => {
-    console.log(message);
-  })
-  .catch((message) => {
-    if (message["code"] === "ECONNREFUSED") {
-      console.log("Rabbit MQ Connection Error, check the server status");
-      console.log(message);
-    } else if (message === "Incorrect Platform") {
-      console.log(message);
-    } else {
-      console.log("Error in Channel Creation, Rabbit MQ Running");
-      console.log(message);
-    }
-  });
+main();
